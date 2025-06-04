@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>晚餐決定轉盤</title>
+  <style>
+    /* ----------------------------------------------------
+       全域樣式
+    ---------------------------------------------------- */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Arial", sans-serif;
+      text-align: center;
+      padding: 20px;
+      background-color: #f5f5f5;
+      margin: 0;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    /* ----------------------------------------------------
+       轉盤容器：設定寬高與置中
+    ---------------------------------------------------- */
+    #wheel-container {
+      position: relative;
+      width: 90vw;
+      max-width: 500px;
+      height: 90vw;
+      max-height: 500px;
+      margin: 0 auto;
+    }
+
+    /* ----------------------------------------------------
+       畫布：讓 <canvas> 填滿父容器，
+       再由 JavaScript 讀取 offsetWidth/offsetHeight 來設定實際繪製尺寸
+    ---------------------------------------------------- */
+    #wheelcanvas {
+      width: 100%;
+      height: 100%;
+      border: 2px solid #ccc;
+      border-radius: 50%;
+      background-color: #fff;
+      display: block;
+    }
+
+    /* ----------------------------------------------------
+       指針：純 CSS 畫一個紅色三角形，固定在畫布左側中央
+    ---------------------------------------------------- */
+    #pointer {
+      position: absolute;
+      left: -30px;        /* 三角尖端貼緊 #wheel-container 左邊緣 */
+      top: 50%;
+      transform: translateY(-50%);
+      width: 0;
+      height: 0;
+      border-top: 15px solid transparent;
+      border-bottom: 15px solid transparent;
+      border-left: 30px solid #D32F2F; /* 紅色箭頭 */
+      z-index: 10;
+    }
+
+    /* ----------------------------------------------------
+       按鈕與結果文字樣式
+    ---------------------------------------------------- */
+    #spinButton {
+      margin-top: 20px;
+      padding: 12px 24px;
+      font-size: 18px;
+      background-color: #FF7043;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #spinButton:active {
+      background-color: #E64A19;
+    }
+    #result {
+      margin-top: 20px;
+      font-size: 20px;
+      color: #333;
+      min-height: 1.2em;
+    }
+    @media (pointer: coarse) {
+      #spinButton {
+        padding: 16px 32px;
+        font-size: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>晚餐決定轉盤</h1>
+
+  <!-- 轉盤容器 -->
+  <div id="wheel-container">
+    <div id="pointer"></div>
+    <canvas id="wheelcanvas"></canvas>
+  </div>
+
+  <!-- 觸發按鈕 -->
+  <button id="spinButton">開始轉動</button>
+
+  <!-- 顯示選擇結果 -->
+  <p id="result"></p>
+
+  <script>
+    // -----------------------------------------------
+    // 1. 店家清單（示範清單，你也可以自行修改或替換）
+    //    這邊已經先用 Fisher–Yates 演算法隨機打亂。
+    // -----------------------------------------------
+    const optionsOriginal = [
+      "鼎泰豐",
+      "士林居酒屋",
+      "士林鐵板燒",
+      "士林雞蛋煎",
+      "隱咖哩",
+      "士林拉麵",
+      "士林酸菜魚",
+      "士林烤鴨",
+      "芝山滷肉飯",
+      "老倉庫",
+      "池先生",
+      "sogo丸龜",
+      "sogo非常泰",
+      "sogo黑毛屋",
+      "sogo生魚片",
+      "芝山披薩",
+      "彈牙面",
+      "跩哥韓式炸雞",
+      "高島屋bbq",
+      "芝山bbq",
+      "北海道大眾食堂",
+      "許記臭豆腐",
+      "好吃雞",
+      "振興鵝肉飯",
+      "那家鍋貼水餃",
+      "洪記涼麵",
+      "PRIMO PIZZA 布利莫義式窯烤披薩",
+      "面疙瘩",
+      "一條通",
+      "吉豚屋",
+      "蘇梅泰式小館",
+      "肥佬弟"
+    ];
+
+    function shuffleArray(arr) {
+      const array = arr.slice();
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    // 打亂過後的最終選項陣列
+    const options = shuffleArray(optionsOriginal);
+
+    // -----------------------------------------------
+    // 2. 取得 <canvas> 及 setting
+    // -----------------------------------------------
+    const canvas = document.getElementById("wheelcanvas");
+    const ctx = canvas.getContext("2d");
+
+    let startAngle = 0;         // 目前旋轉弧度
+    let arc;                    // 每個扇區的弧度
+    const insideRadius = 60;    // 轉盤中心白色小圓半徑
+
+    // -----------------------------------------------
+    // 3. 調整畫布尺寸，並計算 arc 弧度
+    //    每次視窗改變大小時，會呼叫此函式
+    // -----------------------------------------------
+    function resizeCanvas() {
+      // 直接使用 offsetWidth/offsetHeight（對應 CSS 設定的 100%）
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      arc = Math.PI * 2 / options.length;
+      drawWheel();
+    }
+
+    window.addEventListener("load", resizeCanvas);
+    window.addEventListener("resize", resizeCanvas);
+
+    // -----------------------------------------------
+    // 4. 繪製整個轉盤
+    //    - 先清除
+    //    - 依照 options.length 決定扇區數量
+    //    - 每個扇區交替顏色，繪製完後為該扇區畫上橫向文字
+    //    - 最後畫一個中心白色小圓
+    // -----------------------------------------------
+    function drawWheel() {
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const actualOutsideRadius = Math.min(centerX, centerY) - 10;
+      const actualTextRadius = actualOutsideRadius - 30;
+
+      // 清除整個畫布
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 逐一畫出每個扇區
+      for (let i = 0; i < options.length; i++) {
+        const angle = startAngle + i * arc;
+        // 交替顏色
+        ctx.fillStyle = i % 2 === 0 ? "#FFEB3B" : "#FFC107";
+
+        // 開始畫扇區
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, actualOutsideRadius, angle, angle + arc, false);
+        ctx.closePath();
+        ctx.fill();
+
+        // 在該扇區中心線「橫向」畫上店家名稱
+        ctx.save();
+        ctx.fillStyle = "#000";
+        ctx.font = "14px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const textAngle = angle + arc / 2;
+        const x = centerX + Math.cos(textAngle) * actualTextRadius;
+        const y = centerY + Math.sin(textAngle) * actualTextRadius;
+        ctx.fillText(options[i], x, y);
+        ctx.restore();
+      }
+
+      // 最後在中心畫個白色小圓
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, insideRadius, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // -----------------------------------------------
+    // 5. 緩動函數：讓轉盤看起來慢慢停下
+    // -----------------------------------------------
+    function easeOut(t, b, c, d) {
+      const ts = (t /= d) * t;
+      const tc = ts * t;
+      return b + c * (tc + -3 * ts + 3 * t);
+    }
+
+    // -----------------------------------------------
+    // 6. 啟動旋轉動畫
+    // -----------------------------------------------
+    function spin() {
+      const spinAngleStart = Math.random() * 10 + 10;       // 初始速度（度數）
+      let spinTime = 0;                                     // 已經旋轉了多少時間
+      const spinTimeTotal = Math.random() * 3000 + 4000;    // 隨機總旋轉時間（ms）
+
+      function rotate() {
+        spinTime += 30;
+        if (spinTime >= spinTimeTotal) {
+          stopRotate();
+          return;
+        }
+        // 緩動公式計算當下應該減速到的速度
+        const spinAngle = spinAngleStart - easeOut(spinTime, 0, spinAngleStart, spinTimeTotal);
+        // 轉盤旋轉速度（轉成弧度）
+        startAngle += (spinAngle * Math.PI / 180);
+        drawWheel();
+        requestAnimationFrame(rotate);
+      }
+      rotate();
+    }
+
+    // -----------------------------------------------
+    // 7. 停下轉盤，並計算最終落在哪個扇區
+    //    由於指針在 180°，因此在度數上要 +180°
+    // -----------------------------------------------
+    function stopRotate() {
+      const degrees = (startAngle * 180 / Math.PI) + 180;
+      const arcd = arc * 180 / Math.PI;
+      const index = Math.floor((360 - (degrees % 360)) / arcd) % options.length;
+      const selected = options[index];
+      document.getElementById("result").textContent = "今晚晚餐： " + selected;
+    }
+
+    // 監聽按鈕點擊
+    document.getElementById("spinButton").addEventListener("click", () => {
+      document.getElementById("result").textContent = ""; 
+      spin();
+    });
+  </script>
+</body>
+</html>
